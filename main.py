@@ -11,7 +11,6 @@ from rich.table import Table
 
 from src.agent.agent import EducationalAgent
 from src.tools.base import ToolRegistry
-from src.tools.echo import EchoTool
 from src.tools.mistakes_search import MistakesSearchTool
 from src.tools.mistakes_store import MistakesStoreTool
 
@@ -21,7 +20,6 @@ console = Console()
 def build_registry() -> ToolRegistry:
     return ToolRegistry(
         [
-            EchoTool(),
             MistakesStoreTool(),
             MistakesSearchTool(),
         ]
