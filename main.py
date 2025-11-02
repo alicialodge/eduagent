@@ -13,6 +13,7 @@ from src.agent.agent import EducationalAgent
 from src.tools.base import ToolRegistry
 from src.tools.mistakes_search import MistakesSearchTool
 from src.tools.mistakes_store import MistakesStoreTool
+from src.tools.user_name import UserNameTool
 
 console = Console()
 
@@ -20,6 +21,7 @@ console = Console()
 def build_registry() -> ToolRegistry:
     return ToolRegistry(
         [
+            UserNameTool(),
             MistakesStoreTool(),
             MistakesSearchTool(),
         ]
