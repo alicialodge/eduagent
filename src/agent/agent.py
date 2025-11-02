@@ -11,27 +11,12 @@ from src.tools.base import ToolInvocationError, ToolRegistry
 from .prompt import SYSTEM_PROMPT, USER_WRAPPER
 
 
-def _scrub_payload_for_debug(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a JSON-serialisable snapshot of the outgoing request."""
-
-    def scrub_message(message: Dict[str, Any]) -> Dict[str, Any]:
-        scrubbed: Dict[str, Any] = {"role": message.get("role")}
-        if "name" in message:
-            scrubbed["name"] = message["name"]
-        if "content" in message:
-            scrubbed["content"] = message["content"]
-        if "tool_calls" in message:
-            scrubbed["tool_calls"] = message["tool_calls"]
-        if "tool_call_id" in message:
-            scrubbed["tool_call_id"] = message["tool_call_id"]
-        return scrubbed
-
-    return {
-        "model": payload.get("model"),
-        "tool_choice": payload.get("tool_choice"),
-        "tools": payload.get("tools"),
-        "messages": [scrub_message(message) for message in payload.get("messages", [])],
-    }
+def _truncate(value: str, limit: int = 100) -> str:
+    """Collapse whitespace and trim strings to a compact preview."""
+    collapsed = " ".join(str(value).split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return f"{collapsed[: limit - 3]}..."
 
 
 class AgentLoopError(RuntimeError):
@@ -47,9 +32,19 @@ class AgentConversation:
         self._messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         self._has_primary_goal = False
         if verbose:
-            tool_definitions = self._agent.registry.as_openai_tools()
-            self._agent._console.print("[yellow]Tool definitions provided to the model:[/yellow]")
-            self._agent._console.print_json(data={"tools": tool_definitions})
+            system_preview = _truncate(SYSTEM_PROMPT)
+            self._agent._console.print(f"[yellow]System prompt:[/yellow] {system_preview}")
+            user_wrapper_preview = _truncate(USER_WRAPPER)
+            self._agent._console.print(f"[yellow]User wrapper:[/yellow] {user_wrapper_preview}")
+
+            tool_summaries = self._agent.registry.list_tools()
+            if tool_summaries:
+                self._agent._console.print("[yellow]Tools:[/yellow]")
+                for tool in tool_summaries:
+                    description = _truncate(tool.get("description", ""), limit=80)
+                    self._agent._console.print(f"  - {tool['name']}: {description}")
+            else:
+                self._agent._console.print("[yellow]Tools:[/yellow] none registered")
 
     def ask(self, user_input: str, *, max_turns: int = 6) -> str:
         if not self._has_primary_goal:
@@ -103,19 +98,7 @@ class EducationalAgent:
         verbose: bool,
     ) -> str:
         tool_definitions = self._registry.as_openai_tools()
-        for step in range(max_turns):
-            request_payload = {
-                "model": self._model,
-                "messages": messages,
-                "tools": tool_definitions,
-                "tool_choice": "auto",
-            }
-            if verbose:
-                self._console.print(
-                    f"[yellow]--- Request to OpenAI (step {step + 1}) ---[/yellow]"
-                )
-                self._console.print_json(data=_scrub_payload_for_debug(request_payload))
-
+        for _ in range(max_turns):
             response = self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,
@@ -138,16 +121,6 @@ class EducationalAgent:
                     }
                     for call in assistant_message.tool_calls
                 ]
-
-            if verbose:
-                response_snapshot: Dict[str, Any] = {"role": assistant_message.role}
-                if assistant_message.content is not None:
-                    response_snapshot["content"] = assistant_message.content
-                if tool_calls_payload:
-                    response_snapshot["tool_calls"] = tool_calls_payload
-
-                self._console.print("[yellow]--- Response from OpenAI ---[/yellow]")
-                self._console.print_json(data=response_snapshot)
 
             messages.append(
                 {
@@ -187,12 +160,19 @@ class EducationalAgent:
         *,
         verbose: bool = False,
     ) -> str:
-        if verbose:
-            self._console.print(
-                f"[blue]Calling tool[/blue] {function.name} with args {function.arguments}"
-            )
+        raw_arguments = function.arguments or "{}"
+        try:
+            arguments = json.loads(raw_arguments)
+        except json.JSONDecodeError:
+            if verbose:
+                args_preview = _truncate(raw_arguments)
+                self._console.print(f"[blue]Tool call[/blue] {function.name}: {args_preview}")
+            raise
+        else:
+            if verbose:
+                args_preview = _truncate(json.dumps(arguments, separators=(",", ":")))
+                self._console.print(f"[blue]Tool call[/blue] {function.name}: {args_preview}")
 
-        arguments = json.loads(function.arguments or "{}")
         try:
             result = self._registry.invoke(function.name, arguments)
         except ToolInvocationError as exc:
@@ -202,7 +182,8 @@ class EducationalAgent:
             result = error_message
 
         if verbose:
-            self._console.print(f"[magenta]Tool result[/magenta] ({call_id}): {result}")
+            result_preview = _truncate(result)
+            self._console.print(f"[magenta]Tool result[/magenta] {call_id}: {result_preview}")
         return result
 
     def list_tools(self) -> List[Dict[str, str]]:
