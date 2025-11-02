@@ -7,6 +7,7 @@ from openai import OpenAI
 from rich.console import Console
 
 from src.tools.base import ToolInvocationError, ToolRegistry
+from src.utils.transcript import TranscriptWriter
 
 from .prompt import SYSTEM_PROMPT, USER_WRAPPER
 
@@ -26,9 +27,16 @@ class AgentLoopError(RuntimeError):
 class AgentConversation:
     """Stateful wrapper for an interactive conversation with the agent."""
 
-    def __init__(self, agent: "EducationalAgent", *, verbose: bool) -> None:
+    def __init__(
+        self,
+        agent: "EducationalAgent",
+        *,
+        verbose: bool,
+        transcript: TranscriptWriter | None = None,
+    ) -> None:
         self._agent = agent
         self._verbose = verbose
+        self._transcript = transcript
         self._messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         self._has_primary_goal = False
         if verbose:
@@ -53,8 +61,16 @@ class AgentConversation:
         else:
             content = user_input
 
+        if self._transcript:
+            self._transcript.log_user(user_input)
+
         self._messages.append({"role": "user", "content": content})
-        return self._agent._run_loop(self._messages, max_turns=max_turns, verbose=self._verbose)
+        return self._agent._run_loop(
+            self._messages,
+            max_turns=max_turns,
+            verbose=self._verbose,
+            transcript=self._transcript,
+        )
 
     @property
     def messages(self) -> List[Dict[str, Any]]:
@@ -81,14 +97,26 @@ class EducationalAgent:
     def registry(self) -> ToolRegistry:
         return self._registry
 
-    def run(self, goal: str, *, max_turns: int = 15, verbose: bool = False) -> str:
+    def run(
+        self,
+        goal: str,
+        *,
+        max_turns: int = 15,
+        verbose: bool = False,
+        transcript: TranscriptWriter | None = None,
+    ) -> str:
         """Run the agent loop until a final answer is produced."""
-        conversation = self.start_conversation(verbose=verbose)
+        conversation = self.start_conversation(verbose=verbose, transcript=transcript)
         return conversation.ask(goal, max_turns=max_turns)
 
-    def start_conversation(self, *, verbose: bool = False) -> AgentConversation:
+    def start_conversation(
+        self,
+        *,
+        verbose: bool = False,
+        transcript: TranscriptWriter | None = None,
+    ) -> AgentConversation:
         """Create a stateful conversation for interactive CLI usage."""
-        return AgentConversation(self, verbose=verbose)
+        return AgentConversation(self, verbose=verbose, transcript=transcript)
 
     def _run_loop(
         self,
@@ -96,6 +124,7 @@ class EducationalAgent:
         *,
         max_turns: int,
         verbose: bool,
+        transcript: TranscriptWriter | None,
     ) -> str:
         tool_definitions = self._registry.as_openai_tools()
         for _ in range(max_turns):
@@ -130,12 +159,21 @@ class EducationalAgent:
                 }
             )
 
+            if transcript and assistant_message.content:
+                transcript.log_agent(assistant_message.content)
+
             if assistant_message.tool_calls:
                 for tool_call in assistant_message.tool_calls:
+                    if transcript:
+                        transcript.log_tool_call(
+                            tool_call.function.name,
+                            tool_call.function.arguments or "",
+                        )
                     result = self._handle_tool_call(
                         tool_call.id,
                         tool_call.function,
                         verbose=verbose,
+                        transcript=transcript,
                     )
                     messages.append(
                         {
@@ -159,6 +197,7 @@ class EducationalAgent:
         function: Any,
         *,
         verbose: bool = False,
+        transcript: TranscriptWriter | None = None,
     ) -> str:
         raw_arguments = function.arguments or "{}"
         try:
@@ -184,6 +223,8 @@ class EducationalAgent:
         if verbose:
             result_preview = _truncate(result)
             self._console.print(f"[magenta]Tool result[/magenta] {call_id}: {result_preview}")
+        if transcript:
+            transcript.log_tool_result(call_id, str(result))
         return result
 
     def list_tools(self) -> List[Dict[str, str]]:
