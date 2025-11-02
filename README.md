@@ -18,14 +18,12 @@ python main.py chat
 - `src/agent/` — Agent coordination logic and prompt scaffolding.
 - `src/tools/` — Tool base class plus sample tools (echo, mistakes store/search).
 - `scripts/generate_readme.py` — Keeps this README in sync.
-- `tests/` — Basic verification that tool wiring works.
 
 ## Make Targets
 
 - `make run` — Quick smoke run of the agent (non-interactive).
 - `make validate` — Ensure the Echo tool can be invoked.
 - `make tools` — Display registered tools.
-- `make test` — Execute tests with pytest.
 - `make lint` — Lint the project using Ruff.
 - `make docs` — Rebuild this README.
 

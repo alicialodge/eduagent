@@ -17,7 +17,7 @@ def render_readme() -> str:
         ```bash
         make install
         export OPENAI_API_KEY=sk-...
-        python main.py run --goal "Explain list comprehensions."
+        python main.py run --goal "I want to learn Para/Por in Spanish"
         python main.py chat
         ```
 
@@ -27,14 +27,12 @@ def render_readme() -> str:
         - `src/agent/` — Agent coordination logic and prompt scaffolding.
         - `src/tools/` — Tool base class plus sample tools (echo, mistakes store/search).
         - `scripts/generate_readme.py` — Keeps this README in sync.
-        - `tests/` — Basic verification that tool wiring works.
 
         ## Make Targets
 
         - `make run` — Quick smoke run of the agent (non-interactive).
         - `make validate` — Ensure the Echo tool can be invoked.
         - `make tools` — Display registered tools.
-        - `make test` — Execute tests with pytest.
         - `make lint` — Lint the project using Ruff.
         - `make docs` — Rebuild this README.
 

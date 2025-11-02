@@ -1,4 +1,4 @@
-.PHONY: auth install run validate tools test lint docs
+.PHONY: auth install run validate tools lint docs
 
 auth:
 	@echo "Opening a subshell with .env variables exported."
