@@ -1,0 +1,16 @@
+[project]
+name = "eduagent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.120.4",
+    "openai>=2.6.1",
+    "pgvector>=0.4.1",
+    "psycopg[binary]>=3.2.12",
+    "python-dotenv>=1.2.1",
+    "sqlalchemy>=2.0.44",
+    "supabase>=2.23.0",
+    "uvicorn[standard]>=0.38.0",
+]
