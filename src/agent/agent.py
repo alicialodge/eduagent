@@ -204,13 +204,12 @@ class EducationalAgent:
             arguments = json.loads(raw_arguments)
         except json.JSONDecodeError:
             if verbose:
-                args_preview = _truncate(raw_arguments)
-                self._console.print(f"[blue]Tool call[/blue] {function.name}: {args_preview}")
+                self._console.print(f"[blue]Tool call[/blue] {function.name}: {raw_arguments}")
             raise
         else:
             if verbose:
-                args_preview = _truncate(json.dumps(arguments, separators=(",", ":")))
-                self._console.print(f"[blue]Tool call[/blue] {function.name}: {args_preview}")
+                serialized_args = json.dumps(arguments, separators=(",", ":"))
+                self._console.print(f"[blue]Tool call[/blue] {function.name}: {serialized_args}")
 
         try:
             result = self._registry.invoke(function.name, arguments)
@@ -221,8 +220,7 @@ class EducationalAgent:
             result = error_message
 
         if verbose:
-            result_preview = _truncate(result)
-            self._console.print(f"[magenta]Tool result[/magenta] {call_id}: {result_preview}")
+            self._console.print(f"[magenta]Tool result[/magenta] {call_id}: {result}")
         if transcript:
             transcript.log_tool_result(call_id, str(result))
         return result

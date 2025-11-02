@@ -28,7 +28,11 @@ def get_mistake_memory() -> List[MistakeRecord]:
 
 class MistakesStoreTool(Tool):
     name = "mistakes_store"
-    description = "Store a mistake or concept the user has evidently struggled with for later retrieval."
+    description = (
+        "Log a repeated learner mistake after the same concept is missed twice. "
+        "Provide `topic` with the concept name (e.g. 'present tense nosotros') and "
+        "`detail` with a one sentence summary of the misconception."
+    )
     args_schema = MistakeStoreArgs
 
     def run(self, *, topic: str, detail: str) -> str:
