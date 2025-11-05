@@ -6,7 +6,7 @@ import subprocess
 import sys
 from typing import Any, Dict, Iterable
 
-from openai import OpenAI
+import anthropic
 from rich.console import Console
 from rich.table import Table
 
@@ -14,7 +14,7 @@ from src.agent.agent import EducationalAgent
 from src.tools.base import ToolRegistry
 from src.tools.mistakes_search import MistakesSearchTool
 from src.tools.mistakes_store import MistakesStoreTool
-from src.tools.user_name import UserNameTool
+from src.tools.user_name import BasicUserInfoTool
 from src.utils.transcript import TranscriptWriter
 
 console = Console()
@@ -23,7 +23,7 @@ console = Console()
 def build_registry() -> ToolRegistry:
     return ToolRegistry(
         [
-            UserNameTool(),
+            BasicUserInfoTool(),
             MistakesStoreTool(),
             MistakesSearchTool(),
         ]
@@ -31,9 +31,9 @@ def build_registry() -> ToolRegistry:
 
 
 def ensure_api_key() -> None:
-    if not os.getenv("OPENAI_API_KEY"):
+    if not os.getenv("ANTHROPIC_API_KEY"):
         console.print(
-            "[red]OPENAI_API_KEY is not set. Export it before running the agent.[/red]"
+            "[red]ANTHROPIC_API_KEY is not set. Export it before running the agent.[/red]"
         )
         sys.exit(1)
 
@@ -99,7 +99,7 @@ def _maybe_build_transcript(
 
 def run_agent(goal: str, *, verbose: bool, model: str, save_transcript: bool) -> None:
     ensure_api_key()
-    client = OpenAI()
+    client = anthropic.Anthropic()
     registry = build_registry()
     transcript = _maybe_build_transcript(
         "run",
@@ -121,7 +121,7 @@ def interactive_agent(
     save_transcript: bool,
 ) -> None:
     ensure_api_key()
-    client = OpenAI()
+    client = anthropic.Anthropic()
     registry = build_registry()
     transcript = _maybe_build_transcript(
         "chat",
@@ -159,8 +159,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     run_parser.add_argument("--goal", required=True, help="User goal for the agent.")
     run_parser.add_argument(
         "--model",
-        default="gpt-4o-mini",
-        help="Model used for the agent (defaults to gpt-4o-mini).",
+        default="claude-3-haiku-20240307",
+        help="Model used for the agent (defaults to claude-3-haiku-20240307).",
     )
     run_parser.add_argument(
         "--verbose",
@@ -183,8 +183,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     )
     chat_parser.add_argument(
         "--model",
-        default="gpt-4o-mini",
-        help="Model used for the agent (defaults to gpt-4o-mini).",
+        default="claude-3-haiku-20240307",
+        help="Model used for the agent (defaults to claude-3-haiku-20240307).",
     )
     chat_parser.add_argument(
         "--verbose",

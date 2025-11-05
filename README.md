@@ -1,13 +1,13 @@
 # Educational Agent Scaffolding
 
 A minimal CLI scaffolding for an educational coding tutor agent. The agent routes
-user goals through an OpenAI model and can call registered tools.
+user goals through an Anthropic Claude model and can call registered tools.
 
 ## Getting Started
 
 ```bash
 make install
-export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...
 python main.py run --goal "I want to learn Para/Por in Spanish"
 python main.py chat
 ```

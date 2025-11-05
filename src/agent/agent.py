@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from openai import OpenAI
+from anthropic import Anthropic
 from rich.console import Console
 
 from src.tools.base import ToolInvocationError, ToolRegistry
@@ -64,7 +64,9 @@ class AgentConversation:
         if self._transcript:
             self._transcript.log_user(user_input)
 
-        self._messages.append({"role": "user", "content": content})
+        self._messages.append(
+            {"role": "user", "content": [{"type": "text", "text": content}]}
+        )
         return self._agent._run_loop(
             self._messages,
             max_turns=max_turns,
@@ -78,14 +80,16 @@ class AgentConversation:
 
 
 class EducationalAgent:
-    """Simple educational agent that can reason with tools via the OpenAI API."""
+    """Simple educational agent that can reason with tools via the Anthropic Claude API."""
+
+    DEFAULT_MAX_TOKENS = 1024
 
     def __init__(
         self,
-        client: OpenAI,
+        client: Anthropic,
         registry: ToolRegistry,
         *,
-        model: str = "gpt-4o-mini",
+        model: str,
         console: Optional[Console] = None,
     ) -> None:
         self._client = client
@@ -126,95 +130,156 @@ class EducationalAgent:
         verbose: bool,
         transcript: TranscriptWriter | None,
     ) -> str:
-        tool_definitions = self._registry.as_openai_tools()
+        tool_definitions = self._registry.as_anthropic_tools()
         for _ in range(max_turns):
-            response = self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,
-                tools=tool_definitions,
-                tool_choice="auto",
+            system_prompt, request_messages = self._prepare_anthropic_messages(messages)
+            request_kwargs: Dict[str, Any] = {
+                "model": self._model,
+                "messages": request_messages,
+                "max_tokens": self.DEFAULT_MAX_TOKENS,
+            }
+            if system_prompt:
+                request_kwargs["system"] = system_prompt
+            if tool_definitions:
+                request_kwargs["tools"] = tool_definitions
+
+            response = self._client.messages.create(**request_kwargs)
+
+            assistant_blocks, tool_uses = self._parse_assistant_content(response.content)
+            messages.append({"role": "assistant", "content": assistant_blocks})
+
+            assistant_text = "\n".join(
+                block["text"] for block in assistant_blocks if block["type"] == "text"
             )
-            choice = response.choices[0]
-            assistant_message = choice.message
+            if transcript and assistant_text:
+                transcript.log_agent(assistant_text)
 
-            tool_calls_payload: Optional[List[Dict[str, Any]]] = None
-            if assistant_message.tool_calls:
-                tool_calls_payload = [
-                    {
-                        "id": call.id,
-                        "type": call.type,
-                        "function": {
-                            "name": call.function.name,
-                            "arguments": call.function.arguments,
-                        },
-                    }
-                    for call in assistant_message.tool_calls
-                ]
-
-            messages.append(
-                {
-                    "role": assistant_message.role,
-                    "content": assistant_message.content or "",
-                    **({"tool_calls": tool_calls_payload} if tool_calls_payload else {}),
-                }
-            )
-
-            if transcript and assistant_message.content:
-                transcript.log_agent(assistant_message.content)
-
-            if assistant_message.tool_calls:
-                for tool_call in assistant_message.tool_calls:
-                    if transcript:
-                        transcript.log_tool_call(
-                            tool_call.function.name,
-                            tool_call.function.arguments or "",
-                        )
-                    result = self._handle_tool_call(
-                        tool_call.id,
-                        tool_call.function,
+            if tool_uses:
+                tool_result_blocks = []
+                for tool_use in tool_uses:
+                    result = self._handle_tool_use(
+                        tool_use,
                         verbose=verbose,
                         transcript=transcript,
                     )
-                    messages.append(
+                    tool_result_blocks.append(
                         {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
+                            "type": "tool_result",
+                            "tool_use_id": tool_use["id"],
                             "content": result,
                         }
                     )
+                messages.append({"role": "user", "content": tool_result_blocks})
                 continue
 
-            final_answer = (assistant_message.content or "").strip()
+            final_answer = assistant_text.strip()
             return final_answer
 
         raise AgentLoopError(
             "Agent exceeded maximum number of turns without producing a final answer."
         )
 
-    def _handle_tool_call(
+    def _prepare_anthropic_messages(
+        self, messages: List[Dict[str, Any]]
+    ) -> Tuple[str | None, List[Dict[str, Any]]]:
+        system_prompt: str | None = None
+        request_messages: List[Dict[str, Any]] = []
+
+        for message in messages:
+            role = message.get("role")
+            content = message.get("content")
+            if role == "system":
+                system_prompt = str(content)
+                continue
+
+            normalized_blocks = self._normalize_content_blocks(content)
+            request_messages.append({"role": role, "content": normalized_blocks})
+
+        return system_prompt, request_messages
+
+    def _normalize_content_blocks(self, content: Any) -> List[Dict[str, Any]]:
+        if isinstance(content, list):
+            normalized: List[Dict[str, Any]] = []
+            for block in content:
+                if isinstance(block, dict):
+                    normalized.append(block)
+                    continue
+                block_type = getattr(block, "type", None)
+                if block_type == "text":
+                    normalized.append({"type": "text", "text": getattr(block, "text", "")})
+                elif block_type == "tool_use":
+                    normalized.append(
+                        {
+                            "type": "tool_use",
+                            "id": getattr(block, "id"),
+                            "name": getattr(block, "name"),
+                            "input": getattr(block, "input", {}),
+                        }
+                    )
+                elif block_type == "tool_result":
+                    normalized.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": getattr(block, "tool_use_id"),
+                            "content": getattr(block, "content", ""),
+                        }
+                    )
+            if normalized:
+                return normalized
+
+        return [{"type": "text", "text": str(content)}]
+
+    def _parse_assistant_content(
+        self, content_blocks: List[Any]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        assistant_blocks: List[Dict[str, Any]] = []
+        tool_uses: List[Dict[str, Any]] = []
+
+        for block in content_blocks:
+            block_type = getattr(block, "type", None)
+            if block_type == "text":
+                text_block = {"type": "text", "text": getattr(block, "text", "")}
+                assistant_blocks.append(text_block)
+            elif block_type == "tool_use":
+                tool_block = {
+                    "type": "tool_use",
+                    "id": getattr(block, "id"),
+                    "name": getattr(block, "name"),
+                    "input": getattr(block, "input", {}) or {},
+                }
+                assistant_blocks.append(tool_block)
+                tool_uses.append(tool_block)
+            else:
+                fallback_text = getattr(block, "text", None)
+                if fallback_text is None and hasattr(block, "to_dict"):
+                    fallback_text = json.dumps(block.to_dict())
+                if fallback_text is None:
+                    fallback_text = str(block)
+                assistant_blocks.append({"type": "text", "text": str(fallback_text)})
+
+        return assistant_blocks, tool_uses
+
+    def _handle_tool_use(
         self,
-        call_id: str,
-        function: Any,
+        tool_use: Dict[str, Any],
         *,
         verbose: bool = False,
         transcript: TranscriptWriter | None = None,
     ) -> str:
-        raw_arguments = function.arguments or "{}"
-        try:
-            arguments = json.loads(raw_arguments)
-        except json.JSONDecodeError:
-            if verbose:
-                self._console.print(f"[blue]Tool call[/blue] {function.name}: {raw_arguments}")
-            raise
-        else:
-            if verbose:
-                serialized_args = json.dumps(arguments, separators=(",", ":"))
-                self._console.print(f"[blue]Tool call[/blue] {function.name}: {serialized_args}")
+        call_id = tool_use["id"]
+        tool_name = tool_use["name"]
+        arguments = tool_use.get("input", {}) or {}
+
+        serialized_args = json.dumps(arguments, separators=(",", ":"))
+        if verbose:
+            self._console.print(f"[blue]Tool call[/blue] {tool_name}: {serialized_args}")
+        if transcript:
+            transcript.log_tool_call(tool_name, serialized_args)
 
         try:
-            result = self._registry.invoke(function.name, arguments)
+            result = self._registry.invoke(tool_name, arguments)
         except ToolInvocationError as exc:
-            error_message = f"Tool {function.name} failed: {exc}"
+            error_message = f"Tool {tool_name} failed: {exc}"
             if verbose:
                 self._console.print(f"[red]{error_message}[/red]")
             result = error_message

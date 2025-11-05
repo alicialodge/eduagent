@@ -28,12 +28,9 @@ class Tool(ABC):
 
     def schema(self) -> Dict[str, Any]:
         return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": self.args_schema.model_json_schema(),
-            },
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.args_schema.model_json_schema(),
         }
 
     def invoke(self, arguments: Dict[str, Any]) -> str:
@@ -78,7 +75,7 @@ class ToolRegistry:
             for name, tool in self._tools.items()
         ]
 
-    def as_openai_tools(self) -> List[Dict[str, Any]]:
+    def as_anthropic_tools(self) -> List[Dict[str, Any]]:
         return [tool.schema() for tool in self._tools.values()]
 
     def invoke(self, name: str, arguments: Dict[str, Any]) -> str:
